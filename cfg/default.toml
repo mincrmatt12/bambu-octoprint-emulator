@@ -1,0 +1,9 @@
+[printer]
+# IP address of printer
+ip = 
+# Serial number of the printer - required for MQTT
+serial = 
+# Printer LAN access code
+access_code = 
+
+[server]
