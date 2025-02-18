@@ -11,11 +11,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
-use unix_path::PathBuf;
+use crate::slurper::PathBuf;
 
 use crate::{bambu_tls::bbl_printer_connector_builder, config::PrinterConfig};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub enum FilePath {
     /// We heard a project_file command response which pointed at this path on the sdcard
     /// and with this specific subpath.
@@ -25,7 +25,8 @@ pub enum FilePath {
     /// performed; config allows listing which folders to enumerate in) but more annoyingly
     /// it might be a 3MF where we don't know which plate is being printed.
     StrippedPath(PathBuf),
-    /// We don't have an active job
+    /// We don't have an active job. Downstream code usually ignores this and retains the
+    /// last known job until receiving an Idle/Offline state.
     #[default]
     NoJob,
 }
@@ -61,6 +62,7 @@ pub enum PrinterEvent {
         raw: &'static str,
         code: PrintStateCode,
     },
+    GcodeLine(u64)
 }
 
 async fn wait_for_printer(cfg: &PrinterConfig) -> Result<(), anyhow::Error> {
@@ -173,10 +175,19 @@ fn parse_thermistors_from_push(
         .flatten()
 }
 
-#[derive(Merge, Default)]
+fn merge_always<T>(left: &mut Option<T>, right: Option<T>) {
+    if right.is_some() {
+        *left = right;
+    }
+}
+
+#[derive(Merge, Default, Debug)]
 struct PrinterStateInfo {
+    #[merge(strategy = merge_always)]
     stg_cur: Option<i64>,
+    #[merge(strategy = merge_always)]
     gcode_state: Option<PrintStateCode>,
+    #[merge(strategy = merge_always)]
     print_error: Option<u64>,
 }
 
@@ -203,6 +214,8 @@ impl PrinterStateInfo {
         let next_desc = match next_psc {
             PrintStateCode::Printing => match self.stg_cur.unwrap() {
                 2 | 7 => "Preheating",
+                14 => "Cleaning nozzle",
+                1 | 13 => "Homing",
                 4 | 22 | 24 => "Changing filament",
                 _ => "Printing",
             },
@@ -239,7 +252,7 @@ fn parse_printer_state_info(print: &serde_json::Value) -> PrinterStateInfo {
 }
 
 fn parse_print_url(url: &str) -> PathBuf {
-    static SD_PREFIXES: &[&str] = &["ftp:///", "file:///mnt/sdcard/", "file:///sdcard/"];
+    static SD_PREFIXES: &[&str] = &["ftp://", "file:///mnt/sdcard", "file:///sdcard"];
 
     for pfx in SD_PREFIXES {
         if let Some(total) = url.strip_prefix(pfx) {
@@ -254,20 +267,12 @@ fn parse_print_url(url: &str) -> PathBuf {
     PathBuf::from(url)
 }
 
-async fn listen_over_mqtt(
-    client: AsyncClient,
-    cfg: Arc<PrinterConfig>,
+async fn listen_from_mqtt(
     mut report_stream: mpsc::UnboundedReceiver<serde_json::Value>,
     event_stream_out: broadcast::Sender<PrinterEvent>,
     file_stream_out: watch::Sender<FilePath>,
     ct: CancellationToken,
 ) {
-    client
-        .subscribe(format!("device/{}/report", cfg.serial), QoS::AtMostOnce)
-        .await
-        .unwrap();
-    request_pushall(&client, &cfg).await;
-
     // Retained state objects (merged as partial reports come in)
     let mut state_info: PrinterStateInfo = Default::default();
 
@@ -289,7 +294,7 @@ async fn listen_over_mqtt(
                     let _ = event_stream_out.send(therm_event);
                 }
                 // Decide on the current printer state
-                let next_state = parse_printer_state_info(print);
+                let mut next_state = parse_printer_state_info(print);
                 if !next_state.is_empty() {
                     match next_state.gcode_state {
                         Some(
@@ -297,7 +302,24 @@ async fn listen_over_mqtt(
                             | PrintStateCode::Cancelled
                             | PrintStateCode::Idle
                             | PrintStateCode::Failed,
-                        ) => gcode_file_armed = true,
+                        ) => {
+                            gcode_file_armed = true;
+                        }
+                        _ => {}
+                    }
+                    // print_error resets to 0 very quickly after a print error; if the print is
+                    // still marked failed, we want to retain a non-zero error if possible
+                    if next_state.print_error == Some(0) && state_info.gcode_state == Some(PrintStateCode::Failed) {
+                        next_state.print_error = None;
+                    }
+                    // similarly, if we're currently idle or printing, clear out the error
+                    match (next_state.gcode_state, next_state.print_error) {
+                        (Some(
+                            PrintStateCode::Idle
+                            | PrintStateCode::Printing
+                        ), None) => {
+                            next_state.print_error = Some(0);
+                        }
                         _ => {}
                     }
                     state_info.merge(next_state);
@@ -305,6 +327,8 @@ async fn listen_over_mqtt(
                         let _ = event_stream_out.send(state_info.as_state_update());
                     }
                 }
+                // Handle updates to gcode_file to guess current job info
+                // (trying not to override data from project_file)
                 if let Some(gcode_path) = print
                     .get("gcode_file")
                     .and_then(serde_json::Value::as_str)
@@ -392,14 +416,23 @@ pub async fn spy_on_printer(
         let (client, mut event_loop) = make_mqtt_client(&cfg)?;
         let (sub_tx, sub_rx) = mpsc::unbounded_channel();
         let sub_ct = CancellationToken::new();
-        let sub_task = tokio::spawn(listen_over_mqtt(
-            client,
-            cfg.clone(),
-            sub_rx,
-            event_stream_out.clone(),
-            file_stream_out.clone(),
-            sub_ct.clone(),
-        ));
+        let sub_task = tokio::spawn({
+            let local_es = event_stream_out.clone();
+            let local_fs = file_stream_out.clone();
+            let sub_ct = sub_ct.clone();
+            let local_cfg = cfg.clone();
+            async move {
+                client
+                    .subscribe(
+                        format!("device/{}/report", local_cfg.serial),
+                        QoS::AtMostOnce,
+                    )
+                    .await
+                    .unwrap();
+                request_pushall(&client, &local_cfg).await;
+                listen_from_mqtt(sub_rx, local_es, local_fs, sub_ct).await;
+            }
+        });
         let sub_ct_guard = sub_ct.drop_guard();
 
         // Run the main MQTT loop
