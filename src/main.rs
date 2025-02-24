@@ -1,9 +1,13 @@
-use std::process::exit;
+use std::{panic, process::exit};
 
 use config::Settings;
 use printer_spy::spy_on_printer;
-use tokio::sync::{broadcast, watch};
-use tracing::{debug, error, info};
+use slurper::slurp_gcode;
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinSet,
+};
+use tracing::{debug, error, info, Level};
 
 mod bambu_tls;
 mod config;
@@ -11,10 +15,14 @@ mod octoprint_server;
 mod printer_spy;
 mod slurper;
 
+pub enum Critical {}
+
 #[tokio::main]
 async fn main() {
     // Setup logging
-    tracing::subscriber::set_global_default(tracing_subscriber::FmtSubscriber::new()).unwrap();
+    tracing_subscriber::fmt()
+        //.with_max_level(Level::DEBUG)
+        .init();
 
     info!("starting up");
 
@@ -28,31 +36,36 @@ async fn main() {
     };
 
     // Start main printer spy task
-    let (printer_event_out, mut printer_events) = broadcast::channel(8);
-    let (file_stream_out, mut file_stream) = watch::channel(Default::default());
+    let (printer_event_out, printer_events) = broadcast::channel(8);
+    let (mut file_stream_out, file_stream) = watch::channel(Default::default());
+    let (gcode_stream_out, gcode_stream) = watch::channel(Default::default());
 
-    tokio::spawn(async move {
-        loop {
-            if let Ok(e) = printer_events.recv().await {
-                info!(?e, "got event");
-            } else {
-                return;
+    // Setup task tracker
+    let mut critical_tasks = JoinSet::new();
+
+    let spy_task = spy_on_printer(settings.printer.clone(), printer_event_out, file_stream_out);
+    let slurp_task = slurp_gcode(
+        settings.printer.clone(),
+        file_stream.clone(),
+        gcode_stream_out,
+    );
+
+    critical_tasks.spawn(slurp_task);
+    critical_tasks.spawn(spy_task);
+
+    if let Some(e) = critical_tasks.join_next().await {
+        match e {
+            Ok(Err(err)) => {
+                error!(%err, "critical task failed");
+                exit(1);
+            }
+            Err(err) => {
+                if err.is_panic() {
+                    panic::resume_unwind(err.into_panic());
+                }
+                error!(%err, "join_next failed");
+                exit(1);
             }
         }
-    });
-
-    tokio::spawn(async move {
-        loop {
-            if let Ok(_) = file_stream.changed().await {
-                let res = &*file_stream.borrow_and_update();
-                info!(?res, "got file stream");
-            } else {
-                return;
-            }
-        }
-    });
-
-    spy_on_printer(settings.printer.clone(), printer_event_out, file_stream_out)
-        .await
-        .unwrap();
+    }
 }

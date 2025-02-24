@@ -1,5 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
+use crate::{slurper::PathBuf, Critical};
 use anyhow::bail;
 use merge::Merge;
 use rumqttc::{
@@ -11,11 +12,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
-use crate::slurper::PathBuf;
 
 use crate::{bambu_tls::bbl_printer_connector_builder, config::PrinterConfig};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub enum FilePath {
     /// We heard a project_file command response which pointed at this path on the sdcard
     /// and with this specific subpath.
@@ -62,7 +62,7 @@ pub enum PrinterEvent {
         raw: &'static str,
         code: PrintStateCode,
     },
-    GcodeLine(u64)
+    GcodeLine(u64),
 }
 
 async fn wait_for_printer(cfg: &PrinterConfig) -> Result<(), anyhow::Error> {
@@ -309,15 +309,14 @@ async fn listen_from_mqtt(
                     }
                     // print_error resets to 0 very quickly after a print error; if the print is
                     // still marked failed, we want to retain a non-zero error if possible
-                    if next_state.print_error == Some(0) && state_info.gcode_state == Some(PrintStateCode::Failed) {
+                    if next_state.print_error == Some(0)
+                        && state_info.gcode_state == Some(PrintStateCode::Failed)
+                    {
                         next_state.print_error = None;
                     }
                     // similarly, if we're currently idle or printing, clear out the error
                     match (next_state.gcode_state, next_state.print_error) {
-                        (Some(
-                            PrintStateCode::Idle
-                            | PrintStateCode::Printing
-                        ), None) => {
+                        (Some(PrintStateCode::Idle | PrintStateCode::Printing), None) => {
                             next_state.print_error = Some(0);
                         }
                         _ => {}
@@ -367,6 +366,14 @@ async fn listen_from_mqtt(
                         modified
                     });
                 }
+                // Handle updates to mc_print_line_number
+                if let Some(line_number) = print.get("mc_print_line_number").and_then(|x| match x {
+                    serde_json::Value::Number(number) => number.as_u64(),
+                    serde_json::Value::String(str) => str.parse().ok(),
+                    _ => None,
+                }) {
+                    let _ = event_stream_out.send(PrinterEvent::GcodeLine(line_number));
+                }
             }
             Some((RawReportKind::ProjectFile, print)) => {
                 let status = print.get("result").and_then(serde_json::Value::as_str);
@@ -400,7 +407,7 @@ pub async fn spy_on_printer(
     cfg: Arc<PrinterConfig>,
     event_stream_out: broadcast::Sender<PrinterEvent>,
     file_stream_out: watch::Sender<FilePath>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Critical> {
     loop {
         // Reset file_stream_out to "not printing"
         file_stream_out.send_replace(Default::default());

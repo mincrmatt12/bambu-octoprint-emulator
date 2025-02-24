@@ -289,11 +289,14 @@ name = "bambu-octoprint-emulator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-std",
  "axum",
  "config",
+ "lazy-regex",
  "lazy_static",
  "merge",
  "native-tls",
+ "regex",
  "rumqttc",
  "serde",
  "serde_json",
