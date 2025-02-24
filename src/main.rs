@@ -1,6 +1,7 @@
 use std::{panic, process::exit};
 
 use config::Settings;
+use octoprint_server::serve_octoprint;
 use printer_spy::spy_on_printer;
 use slurper::slurp_gcode;
 use tokio::{
@@ -37,7 +38,7 @@ async fn main() {
 
     // Start main printer spy task
     let (printer_event_out, printer_events) = broadcast::channel(8);
-    let (mut file_stream_out, file_stream) = watch::channel(Default::default());
+    let (file_stream_out, file_stream) = watch::channel(Default::default());
     let (gcode_stream_out, gcode_stream) = watch::channel(Default::default());
 
     // Setup task tracker
@@ -49,9 +50,16 @@ async fn main() {
         file_stream.clone(),
         gcode_stream_out,
     );
+    let webserver_task = serve_octoprint(
+        settings.server.clone(),
+        printer_events,
+        file_stream.clone(),
+        gcode_stream,
+    );
 
     critical_tasks.spawn(slurp_task);
     critical_tasks.spawn(spy_task);
+    critical_tasks.spawn(webserver_task);
 
     if let Some(e) = critical_tasks.join_next().await {
         match e {

@@ -11,6 +11,7 @@ use std::{
 
 use anyhow::bail;
 use async_std::io::{BufReader, ReadExt};
+use derivative::Derivative;
 use lazy_regex::{lazy_regex, Lazy};
 use regex::Regex;
 use suppaftp::{
@@ -49,7 +50,7 @@ async fn connect_to_ftp(cfg: &PrinterConfig) -> FtpResult<AsyncNativeTlsFtpStrea
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum GcodeMetaSource {
+pub enum GcodeMetaSource {
     Resolved(FilePath),
     Pending3MF {
         known: PathBuf,
@@ -78,12 +79,36 @@ pub struct GcodeMeta {
     pub original_filesize: usize,
 }
 
-pub type Gcode = (GcodeMeta, Box<[u8]>);
+#[derive(Derivative)]
+#[derivative(Debug)]
+pub struct Gcode {
+    pub meta: GcodeMeta,
+    #[derivative(Debug = "ignore")]
+    pub line_table: Box<[usize]>,
+    #[derivative(Debug = "ignore")]
+    pub content: Box<[u8]>,
+}
 
-fn assume_absolute(file: &PathBuf) -> PathBuf {
-    let mut res = PathBuf::from("/");
-    res.push(file);
-    res.normalize()
+impl Gcode {
+    pub fn new(meta: GcodeMeta, content: Box<[u8]>) -> Self {
+        let mut line_table = vec![0];
+
+        for (offs, c) in content.iter().enumerate() {
+            if *c == '\n' as u8 {
+                line_table.push(offs + 1);
+            }
+        }
+
+        if line_table.last().copied() == Some(content.len()) {
+            line_table.pop();
+        }
+
+        Self {
+            meta,
+            line_table: line_table.into_boxed_slice(),
+            content,
+        }
+    }
 }
 
 async fn move_to_containing_directory(
@@ -256,7 +281,7 @@ impl GcodeMeta {
                 zip::ZipArchive::new(std::io::Cursor::new(&content_raw))?
             }
             GcodeMetaSource::Resolved(FilePath::StrippedPath(_)) => {
-                return Ok(Arc::new((self, content_raw)))
+                return Ok(Arc::new(Gcode::new(self, content_raw)))
             }
             _ => unreachable!(),
         };
@@ -304,7 +329,7 @@ impl GcodeMeta {
             .bytes()
             .collect::<Result<Box<[u8]>, _>>()
             .map_err(|x| GcodeError::Zip(x.into()))?;
-        Ok(Arc::new((self, new_contents)))
+        Ok(Arc::new(Gcode::new(self, new_contents)))
     }
 
     // work out what file to download
@@ -523,7 +548,7 @@ pub async fn slurp_gcode(
         };
 
         if let Some(old) = cached_old {
-            if old.0 == targeted_meta {
+            if old.meta == targeted_meta {
                 info!(?targeted_meta, "using old cache instead of re-downloading");
                 gcode_stream_out.send_replace(CurrentGcode::Current(old));
                 continue 'main;

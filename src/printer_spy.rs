@@ -2,6 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use crate::{slurper::PathBuf, Critical};
 use anyhow::bail;
+use enum_map::Enum;
 use merge::Merge;
 use rumqttc::{
     AsyncClient, ConnectionError, Event, EventLoop, MqttOptions, Packet, Publish, QoS, StateError,
@@ -31,7 +32,7 @@ pub enum FilePath {
     NoJob,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Enum)]
 pub enum Thermistor {
     Bed,
     Tool,
