@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{slurper::PathBuf, Critical};
+use crate::{slurper::{Path, PathBuf}, Critical};
 use anyhow::bail;
 use enum_map::Enum;
 use merge::Merge;
@@ -30,6 +30,15 @@ pub enum FilePath {
     /// last known job until receiving an Idle/Offline state.
     #[default]
     NoJob,
+}
+
+impl FilePath {
+    pub fn targeted_filename(&self) -> Option<&Path> {
+        match self {
+            Self::Inside3MF { sdcard, .. } | Self::StrippedPath(sdcard) => Some(sdcard),
+            _ => None
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Enum)]
@@ -64,6 +73,8 @@ pub enum PrinterEvent {
         code: PrintStateCode,
     },
     GcodeLine(u64),
+    RemainingPrintTime(Duration),
+    PrintPercentage(f64)
 }
 
 async fn wait_for_printer(cfg: &PrinterConfig) -> Result<(), anyhow::Error> {
@@ -374,6 +385,15 @@ async fn listen_from_mqtt(
                     _ => None,
                 }) {
                     let _ = event_stream_out.send(PrinterEvent::GcodeLine(line_number));
+                }
+                // Handle progress updates
+                if let Some(pct) = print.get("mc_percent").and_then(serde_json::Value::as_f64) {
+                    let _ = event_stream_out.send(PrinterEvent::PrintPercentage(pct));
+                }
+                if let Some(minutes) = print.get("mc_remaining_time").and_then(serde_json::Value::as_f64) {
+                    let _ = event_stream_out.send(PrinterEvent::RemainingPrintTime(
+                        Duration::from_secs_f64(minutes * 60.)
+                    ));
                 }
             }
             Some((RawReportKind::ProjectFile, print)) => {

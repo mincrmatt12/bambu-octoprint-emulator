@@ -59,14 +59,12 @@ pub enum GcodeMetaSource {
 }
 
 impl GcodeMetaSource {
-    fn targeted_filename(&self) -> &Path {
+    pub fn targeted_filename(&self) -> &Path {
         match self {
-            GcodeMetaSource::Resolved(FilePath::Inside3MF { ref sdcard, .. })
-            | GcodeMetaSource::Pending3MF {
-                known: ref sdcard, ..
+            GcodeMetaSource::Resolved(inner) => inner.targeted_filename().expect("GcodeMeta.source == NoJob"),
+            GcodeMetaSource::Pending3MF {
+                known: sdcard, ..
             } => sdcard,
-            GcodeMetaSource::Resolved(FilePath::StrippedPath(ref target)) => target,
-            GcodeMetaSource::Resolved(FilePath::NoJob) => panic!("GcodeMeta.source == NoJob"),
         }
     }
 }
@@ -84,13 +82,13 @@ pub struct GcodeMeta {
 pub struct Gcode {
     pub meta: GcodeMeta,
     #[derivative(Debug = "ignore")]
-    pub line_table: Box<[usize]>,
+    pub line_table: Arc<[usize]>,
     #[derivative(Debug = "ignore")]
-    pub content: Box<[u8]>,
+    pub content: Arc<[u8]>,
 }
 
 impl Gcode {
-    pub fn new(meta: GcodeMeta, content: Box<[u8]>) -> Self {
+    pub fn new(meta: GcodeMeta, content: Arc<[u8]>) -> Self {
         let mut line_table = vec![0];
 
         for (offs, c) in content.iter().enumerate() {
@@ -105,7 +103,7 @@ impl Gcode {
 
         Self {
             meta,
-            line_table: line_table.into_boxed_slice(),
+            line_table: line_table.into(),
             content,
         }
     }
@@ -126,7 +124,7 @@ async fn download_file(
     conn: &mut AsyncNativeTlsFtpStream,
     file: &Path,
     expected_size: Option<usize>,
-) -> FtpResult<Box<[u8]>> {
+) -> FtpResult<Arc<[u8]>> {
     move_to_containing_directory(conn, file).await?;
 
     let file_name = file.file_name().unwrap();
@@ -144,7 +142,7 @@ async fn download_file(
         .await
         .map_err(|x| FtpError::ConnectionError(x))?;
 
-    Ok(result.into_boxed_slice())
+    Ok(result.into())
 }
 
 // if file is absolute, we get the listing containing it
@@ -327,7 +325,7 @@ impl GcodeMeta {
         };
         let new_contents = target
             .bytes()
-            .collect::<Result<Box<[u8]>, _>>()
+            .collect::<Result<Arc<[u8]>, _>>()
             .map_err(|x| GcodeError::Zip(x.into()))?;
         Ok(Arc::new(Gcode::new(self, new_contents)))
     }
