@@ -60,19 +60,25 @@ async fn main() {
     critical_tasks.spawn(spy_task);
     critical_tasks.spawn(webserver_task);
 
-    if let Some(e) = critical_tasks.join_next().await {
-        match e {
-            Ok(Err(err)) => {
-                error!(%err, "critical task failed");
-                exit(1);
-            }
-            Err(err) => {
-                if err.is_panic() {
-                    panic::resume_unwind(err.into_panic());
+    tokio::select! {
+        Some(e) = critical_tasks.join_next() => {
+            match e {
+                Ok(Err(err)) => {
+                    error!(%err, "critical task failed");
+                    exit(1);
                 }
-                error!(%err, "join_next failed");
-                exit(1);
+                Err(err) => {
+                    if err.is_panic() {
+                        panic::resume_unwind(err.into_panic());
+                    }
+                    error!(%err, "join_next failed");
+                    exit(1);
+                }
             }
+        },
+        Ok(()) = tokio::signal::ctrl_c() => {
+            info!("shutting down");
+            exit(0);
         }
     }
 }
