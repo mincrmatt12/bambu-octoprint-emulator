@@ -1,9 +1,9 @@
-use std::{borrow::Borrow, future::IntoFuture, ops::Deref, sync::Arc, time::{Duration, UNIX_EPOCH}};
+use std::{future::IntoFuture, ops::Deref, sync::Arc, time::{Duration, UNIX_EPOCH}};
 
 use anyhow::bail;
 use arc_swap::ArcSwapOption;
 use axum::{
-    extract::{FromRequestParts, Path, State}, handler::Handler, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::{get, MethodRouter}, Json, Router
+    extract::{FromRequestParts, Path, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::{get, MethodRouter}, Json, Router
 };
 use enum_map::EnumMap;
 use serde_json::{json, Map, Value};
