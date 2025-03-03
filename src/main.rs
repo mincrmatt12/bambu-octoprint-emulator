@@ -8,7 +8,7 @@ use tokio::{
     sync::{broadcast, watch},
     task::JoinSet,
 };
-use tracing::{debug, error, info, Level};
+use tracing::{error, info};
 
 mod bambu_tls;
 mod config;

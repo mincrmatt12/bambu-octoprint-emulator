@@ -82,7 +82,7 @@ async fn wait_for_printer(cfg: &PrinterConfig) -> Result<(), anyhow::Error> {
     let mut pinger = client.pinger(cfg.ip, surge_ping::PingIdentifier(1)).await;
     let mut idx: u16 = 0;
 
-    const PAYLOAD: &'static [u8] = &[0; 56];
+    const PAYLOAD: &[u8] = &[0; 56];
 
     loop {
         use surge_ping::SurgeError as E;
@@ -115,7 +115,7 @@ fn make_mqtt_client(cfg: &PrinterConfig) -> anyhow::Result<(AsyncClient, EventLo
 }
 
 async fn request_pushall(client: &AsyncClient, cfg: &PrinterConfig) {
-    static MSG: &'static [u8] =
+    static MSG: &[u8] =
         br#"{"pushing":{"command":"pushall","push_target":1,"sequence_id":"20001","version":1}}"#;
 
     client
@@ -308,16 +308,13 @@ async fn listen_from_mqtt(
                 // Decide on the current printer state
                 let mut next_state = parse_printer_state_info(print);
                 if !next_state.is_empty() {
-                    match next_state.gcode_state {
-                        Some(
+                    if let Some(
                             PrintStateCode::Finished
                             | PrintStateCode::Cancelled
                             | PrintStateCode::Idle
                             | PrintStateCode::Failed,
-                        ) => {
-                            gcode_file_armed = true;
-                        }
-                        _ => {}
+                        ) = next_state.gcode_state {
+                        gcode_file_armed = true;
                     }
                     // print_error resets to 0 very quickly after a print error; if the print is
                     // still marked failed, we want to retain a non-zero error if possible
@@ -327,11 +324,8 @@ async fn listen_from_mqtt(
                         next_state.print_error = None;
                     }
                     // similarly, if we're currently idle or printing, clear out the error
-                    match (next_state.gcode_state, next_state.print_error) {
-                        (Some(PrintStateCode::Idle | PrintStateCode::Printing), None) => {
-                            next_state.print_error = Some(0);
-                        }
-                        _ => {}
+                    if let (Some(PrintStateCode::Idle | PrintStateCode::Printing), None) = (next_state.gcode_state, next_state.print_error) {
+                        next_state.print_error = Some(0);
                     }
                     state_info.merge(next_state);
                     if state_info.is_full() {

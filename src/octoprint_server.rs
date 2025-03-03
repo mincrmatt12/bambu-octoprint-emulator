@@ -11,12 +11,12 @@ use tokio::{
     net::TcpListener,
     sync::{broadcast, watch}, time::Instant,
 };
-use tracing::{error, info};
+use tracing::info;
 use typed_path::Utf8Component;
 
 use crate::{
     config::ServerConfig,
-    printer_spy::{FilePath, PrintStateCode, PrinterEvent, Thermistor},
+    printer_spy::{PrintStateCode, PrinterEvent, Thermistor},
     slurper::{CurrentGcode, PathBuf},
     Critical,
 };
@@ -127,10 +127,7 @@ pub async fn refresh_api_job(
                                 }
                             },
                             (_, PrintStateCode::Failed | PrintStateCode::Idle | PrintStateCode::Finished | PrintStateCode::Cancelled) => {
-                                match time_stats {
-                                    Some(PrintTime::Printing { started, .. }) => time_stats = Some(PrintTime::Done { took: started.elapsed() }),
-                                    _ => {}
-                                }
+                                if let Some(PrintTime::Printing { started, .. }) = time_stats { time_stats = Some(PrintTime::Done { took: started.elapsed() }) }
                             },
                             (_, PrintStateCode::Offline) => {
                                 time_stats = None;

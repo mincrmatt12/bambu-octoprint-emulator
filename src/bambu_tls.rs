@@ -1,7 +1,7 @@
 use lazy_static::lazy_static;
 use native_tls::{Certificate, TlsConnector, TlsConnectorBuilder};
 
-static BBL_CA_PEM: &'static [u8] = include_bytes!("../res/bbl.pem");
+static BBL_CA_PEM: &[u8] = include_bytes!("../res/bbl.pem");
 
 lazy_static! {
     static ref BBL_CA: Certificate = Certificate::from_pem(BBL_CA_PEM).unwrap();

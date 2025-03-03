@@ -4,7 +4,6 @@ use std::{
     mem::ManuallyDrop,
     ops::{Deref, DerefMut},
     pin::Pin,
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -24,7 +23,7 @@ use tokio::{
     sync::watch,
     time::{sleep, Sleep},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use typed_path::{Utf8UnixPath, Utf8UnixPathBuf};
 use zip::result::ZipError;
 
@@ -92,7 +91,7 @@ impl Gcode {
         let mut line_table = vec![0];
 
         for (offs, c) in content.iter().enumerate() {
-            if *c == '\n' as u8 {
+            if *c == b'\n' {
                 line_table.push(offs + 1);
             }
         }
@@ -140,7 +139,7 @@ async fn download_file(
     incoming
         .read_to_end(&mut result)
         .await
-        .map_err(|x| FtpError::ConnectionError(x))?;
+        .map_err(FtpError::ConnectionError)?;
 
     Ok(result.into())
 }
@@ -169,7 +168,7 @@ async fn search_for_matching_file<'a>(
                 {
                     continue;
                 }
-                err @ _ => err?,
+                err => err?,
             }
         }
 
@@ -206,7 +205,7 @@ async fn search_for_newest_cache(
         Err(FtpError::UnexpectedResponse(resp)) if resp.status == Status::FileUnavailable => {
             return Ok(None);
         }
-        err @ _ => err?,
+        err => err?,
     }
 
     let expected_prefix = match file.file_name().unwrap().split_once('.') {
@@ -410,13 +409,13 @@ struct CachedConnectionRef<'a> {
     conn: ManuallyDrop<AsyncNativeTlsFtpStream>,
 }
 
-impl<'a> DerefMut for CachedConnectionRef<'a> {
+impl DerefMut for CachedConnectionRef<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.conn
     }
 }
 
-impl<'a> Deref for CachedConnectionRef<'a> {
+impl Deref for CachedConnectionRef<'_> {
     type Target = AsyncNativeTlsFtpStream;
 
     fn deref(&self) -> &Self::Target {
@@ -448,7 +447,7 @@ impl CachedConnection {
     // Returns if and only if a previously cached connection expires (for logging purposes).
     // If no connection is active (or if the connection is InUse, which should be impossible)
     // it loops forever.
-    async fn process(&mut self) -> () {
+    async fn process(&mut self) {
         let timer = match self {
             CachedConnection::Cached {
                 inactivity_timer, ..
@@ -467,7 +466,7 @@ impl CachedConnection {
     }
 }
 
-impl<'a> Drop for CachedConnectionRef<'a> {
+impl Drop for CachedConnectionRef<'_> {
     fn drop(&mut self) {
         *self.upstream = CachedConnection::Cached {
             // SAFETY: in drop, never used again
