@@ -50,11 +50,7 @@ async fn main() {
         file_stream.clone(),
         gcode_stream_out,
     );
-    let webserver_task = serve_octoprint(
-        settings.server.clone(),
-        printer_events,
-        gcode_stream,
-    );
+    let webserver_task = serve_octoprint(settings.server.clone(), printer_events, gcode_stream);
 
     critical_tasks.spawn(slurp_task);
     critical_tasks.spawn(spy_task);

@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use crate::{slurper::{Path, PathBuf}, Critical};
+use crate::{
+    slurper::{Path, PathBuf},
+    Critical,
+};
 use anyhow::bail;
 use enum_map::Enum;
 use merge::Merge;
@@ -36,7 +39,7 @@ impl FilePath {
     pub fn targeted_filename(&self) -> Option<&Path> {
         match self {
             Self::Inside3MF { sdcard, .. } | Self::StrippedPath(sdcard) => Some(sdcard),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -74,7 +77,7 @@ pub enum PrinterEvent {
     },
     GcodeLine(u64),
     RemainingPrintTime(Duration),
-    PrintPercentage(f64)
+    PrintPercentage(f64),
 }
 
 async fn wait_for_printer(cfg: &PrinterConfig) -> Result<(), anyhow::Error> {
@@ -309,11 +312,12 @@ async fn listen_from_mqtt(
                 let mut next_state = parse_printer_state_info(print);
                 if !next_state.is_empty() {
                     if let Some(
-                            PrintStateCode::Finished
-                            | PrintStateCode::Cancelled
-                            | PrintStateCode::Idle
-                            | PrintStateCode::Failed,
-                        ) = next_state.gcode_state {
+                        PrintStateCode::Finished
+                        | PrintStateCode::Cancelled
+                        | PrintStateCode::Idle
+                        | PrintStateCode::Failed,
+                    ) = next_state.gcode_state
+                    {
                         gcode_file_armed = true;
                     }
                     // print_error resets to 0 very quickly after a print error; if the print is
@@ -324,7 +328,9 @@ async fn listen_from_mqtt(
                         next_state.print_error = None;
                     }
                     // similarly, if we're currently idle or printing, clear out the error
-                    if let (Some(PrintStateCode::Idle | PrintStateCode::Printing), None) = (next_state.gcode_state, next_state.print_error) {
+                    if let (Some(PrintStateCode::Idle | PrintStateCode::Printing), None) =
+                        (next_state.gcode_state, next_state.print_error)
+                    {
                         next_state.print_error = Some(0);
                     }
                     state_info.merge(next_state);
@@ -384,9 +390,12 @@ async fn listen_from_mqtt(
                 if let Some(pct) = print.get("mc_percent").and_then(serde_json::Value::as_f64) {
                     let _ = event_stream_out.send(PrinterEvent::PrintPercentage(pct));
                 }
-                if let Some(minutes) = print.get("mc_remaining_time").and_then(serde_json::Value::as_f64) {
+                if let Some(minutes) = print
+                    .get("mc_remaining_time")
+                    .and_then(serde_json::Value::as_f64)
+                {
                     let _ = event_stream_out.send(PrinterEvent::RemainingPrintTime(
-                        Duration::from_secs_f64(minutes * 60.)
+                        Duration::from_secs_f64(minutes * 60.),
                     ));
                 }
             }

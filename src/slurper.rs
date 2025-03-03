@@ -60,10 +60,10 @@ pub enum GcodeMetaSource {
 impl GcodeMetaSource {
     pub fn targeted_filename(&self) -> &Path {
         match self {
-            GcodeMetaSource::Resolved(inner) => inner.targeted_filename().expect("GcodeMeta.source == NoJob"),
-            GcodeMetaSource::Pending3MF {
-                known: sdcard, ..
-            } => sdcard,
+            GcodeMetaSource::Resolved(inner) => inner
+                .targeted_filename()
+                .expect("GcodeMeta.source == NoJob"),
+            GcodeMetaSource::Pending3MF { known: sdcard, .. } => sdcard,
         }
     }
 }
