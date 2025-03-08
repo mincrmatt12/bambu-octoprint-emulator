@@ -213,7 +213,7 @@ pub async fn refresh_api_job(
     }
 }
 
-struct ProvidedAuth();
+struct ProvidedAuth;
 
 struct ApiState {
     current_state_response: StaticOutput,
@@ -260,7 +260,7 @@ impl<T: Deref<Target = ApiState> + Sync> FromRequestParts<T> for ProvidedAuth {
             }
         }
 
-        Ok(ProvidedAuth())
+        Ok(ProvidedAuth)
     }
 }
 
