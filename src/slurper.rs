@@ -336,8 +336,21 @@ impl GcodeMeta {
     ) -> Result<Self, GcodeError> {
         let (mut source, listing) = match target {
             FilePath::Inside3MF { ref sdcard, .. } => {
-                if let Some((_, listing)) = search_for_matching_file(conn, sdcard).await? {
-                    (GcodeMetaSource::Resolved(target), listing)
+                if let Some((realpath, listing)) = search_for_matching_file(conn, sdcard).await? {
+                    if sdcard.has_root() {
+                        (GcodeMetaSource::Resolved(target), listing)
+                    } else {
+                        let FilePath::Inside3MF { subpath, .. } = target else {
+                            unreachable!()
+                        };
+                        (
+                            GcodeMetaSource::Resolved(FilePath::Inside3MF {
+                                sdcard: realpath.into_owned(),
+                                subpath,
+                            }),
+                            listing,
+                        )
+                    }
                 } else {
                     return Err(GcodeError::FileNotFound);
                 }
