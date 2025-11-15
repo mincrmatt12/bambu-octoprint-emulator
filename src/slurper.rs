@@ -221,20 +221,16 @@ async fn search_for_newest_cache(
         .map(|x| list::File::try_from(x.as_str()))
         .filter_map(|x| x.ok())
     {
-        if let Some(candidate) = entry.name().strip_prefix(expected_prefix) {
-            if let Some(matches) = CACHE_PLATE_RE.captures(candidate) {
-                if let Some(idx) = matches
+        if let Some(candidate) = entry.name().strip_prefix(expected_prefix)
+            && let Some(matches) = CACHE_PLATE_RE.captures(candidate)
+                && let Some(idx) = matches
                     .get(1)
                     .and_then(|x| x.as_str().parse::<usize>().ok())
-                {
-                    if newest_candidate.is_none()
-                        || newest_candidate.as_ref().unwrap().0 < entry.modified()
+                    && (newest_candidate.is_none()
+                        || newest_candidate.as_ref().unwrap().0 < entry.modified())
                     {
                         newest_candidate = Some((entry.modified(), idx));
                     }
-                }
-            }
-        }
     }
 
     Ok(newest_candidate.map(|x| x.1))
@@ -300,12 +296,11 @@ impl GcodeMeta {
                 if fallback.is_none() {
                     fallback = Some(potential.into());
                 }
-                if let Some(hint) = hint_plate_file {
-                    if hint == capture {
+                if let Some(hint) = hint_plate_file
+                    && hint == capture {
                         fallback = Some(potential.into());
                         break;
                     }
-                }
             }
             if let Some(fname) = fallback {
                 self.source = GcodeMetaSource::Resolved(FilePath::Inside3MF {
@@ -316,12 +311,12 @@ impl GcodeMeta {
                 return Err(GcodeError::NoGcodeIn3MF);
             }
         }
-        let target = match self.source {
+        let target = std::io::BufReader::new(match self.source {
             GcodeMetaSource::Resolved(FilePath::Inside3MF { ref subpath, .. }) => {
                 zipfile.by_name(subpath.as_str())?
             }
             _ => unreachable!(),
-        };
+        });
         let new_contents = target
             .bytes()
             .collect::<Result<Arc<[u8]>, _>>()
@@ -557,13 +552,12 @@ pub async fn slurp_gcode(
             }
         };
 
-        if let Some(old) = cached_old {
-            if old.meta == targeted_meta {
+        if let Some(old) = cached_old
+            && old.meta == targeted_meta {
                 info!(?targeted_meta, "using old cache instead of re-downloading");
                 gcode_stream_out.send_replace(CurrentGcode::Current(old));
                 continue 'main;
             }
-        }
 
         info!(?targeted_meta, "downloading target file");
         gcode_stream_out.send_replace(CurrentGcode::Current(
